@@ -12,11 +12,14 @@ import socket
 import threading
 import time
 import Queue
+import re
+import urllib
 from ConfigParser import ConfigParser, NoOptionError, NoSectionError
 from SocketServer import ThreadingMixIn
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 
-VERSION = "0.0"
+SERVER_VERSION = "0.0"
+PROTOCOL_VERSION = 0
 
 def _shred( string ):
     f = "finding offset"
@@ -149,7 +152,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 continue
             try:
                 #client.send( xmpp.Message( "koen@koenbollen.nl", "AppTest" ) )
-                self.log_message( "sent: %s" % msg[:10] )
+                self.log_message( "sent: %r" % (msg,) )
             finally:
                 self.__queue.task_done()
 
@@ -225,16 +228,58 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
 class NotifyRequestHandler( BaseHTTPRequestHandler ):
-    server_version = "XMPPNotify/"+VERSION
+    server_version = "XMPPNotify/"+SERVER_VERSION
     protocol_version = "HTTP/1.1"
 
-    def do_GET(self ):
-        pass
+    fields = {
+            # name:    type,  required
+            'target':  (str,  False ),
+            'subject': (str,  False ),
+            'data':    (str,  True  ),
+        }
+
+    rx_path = re.compile( r"/(\d+)/notify(?:/(\w+))?" )
+
 
     def do_POST(self ):
+        general = self.server.config['general']
 
-        # TODO: Parse postdata and construct msg.
-        msg = self.path
+        result = self.rx_path.match( self.path )
+        if not result:
+            return self.send_error( 404 )
+        version, subject = result.groups()
+        if int(version) != PROTOCOL_VERSION:
+            return self.send_error( 400 )
+        if not subject:
+            subject = "Notifications"
+
+        try:
+            length = min( int( self.headers['Content-Length'] ), 4096 )
+        except (ValueError, KeyError):
+            length = None
+
+        try:
+            rawdata = self.rfile.read( length )
+        except IOError, e:
+            return self.send_error( 500 )
+
+        msg = { 'target': general['target'],
+                'subject': subject }
+        for pair in rawdata.split("&"):
+            try:
+                key, value = pair.split( "=", 1 )
+            except ValueError:
+                key, value = pair, True
+            key = key.lower().strip()
+            if key not in self.fields:
+                continue
+            msg[key] = urllib.unquote( value.strip().replace("+"," ") )
+        for key, (func, req) in self.fields.items():
+            try:
+                value = func( msg[key] )
+                msg[key] = value
+            except (KeyError, ValueError):
+                if req: return self.send_error( 400 )
 
         try:
             self.server.queue.put_nowait( msg )
@@ -242,7 +287,9 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
             return self.send_error( 503 )
 
         self.send_response( 202, "Message Queued" )
+        self.send_header( "Content-Length:", 0 )
         self.end_headers()
+
 
     def log_message(self, format, *args):
         msg = "%s %s" % ( self.address_string(), format%args )
