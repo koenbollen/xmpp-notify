@@ -22,6 +22,7 @@ SERVER_VERSION = "0.0"
 PROTOCOL_VERSION = 0
 
 def _shred( string ):
+    """Find memory of a string and override it."""
     f = "finding offset"
     header = ctypes.string_at( id(f), sys.getsizeof(f) ).find(f)
     location = id(string) + header
@@ -99,20 +100,20 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             ]
 
         res = {}
-        for f, s, r, g, d in fields:
+        for field, sect, req, func, default in fields:
             try:
-                value = g( s, f )
-                if g == cfg.get and len(value) < 1:
-                    raise NoOptionError(s,f)
+                value = func( sect, field )
+                if func == cfg.get and len(value) < 1:
+                    raise NoOptionError(sect,field)
             except (NoSectionError, NoOptionError):
-                if r:
+                if req:
                     # TODO: Change message
-                    print >>sys.stderr, "missing configuration: %s" % f
+                    print >>sys.stderr, "missing configuration: %s" % field
                     return False
-                value = d
-            if s not in res:
-                res[s] = {}
-            res[s][f] = value
+                value = default
+            if sect not in res:
+                res[sect] = {}
+            res[sect][field] = value
 
         general = res['general']
         if general['log'] not in ("file", "syslog"):
@@ -147,12 +148,21 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
     def __queue_handle(self ):
         while self.__queue.qsize() > 0 or self.__alive:
             try:
-                msg = self.__queue.get( True, 1 )
+                info = self.__queue.get( True, 1 )
             except Queue.Empty:
                 continue
             try:
-                #client.send( xmpp.Message( "koen@koenbollen.nl", "AppTest" ) )
-                self.log_message( "sent: %r" % (msg,) )
+                msg = xmpp.Message( info['target'], info['data'],
+                        subject=info['subject'] )
+                ret = self.__client.send( msg )
+                if ret:
+                    self.log_message( "sent %s to %s (%s)" % (
+                            info['subject'], info['target'], ret
+                        ) )
+                else:
+                    self.log_message( "failed to send %s to %s! (%s)" % (
+                            info['subject'], info['target'], ret
+                        ) )
             finally:
                 self.__queue.task_done()
 
@@ -171,14 +181,25 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         auth = self.config['auth']
         server = self.config['server']
         client = xmpp.Client( auth['domain'], debug=[] )
+
         if "host" not in server or not server['host']:
             server['host'] = auth['domain']
-        client.connect( server=(server['host'], server['port']) )
-        client.auth(
+        ret = client.connect( server=(server['host'], server['port']) )
+        if not ret:
+            self.log_message( "error: could not authenticate!" )
+            return False
+        self.log_message( "connected with: %s" % ret )
+
+        ret = client.auth(
                 auth['username'],
                 auth['password'],
                 auth['resource']
             )
+        if not ret:
+            self.log_message( "error: could not authenticate!" )
+            return False
+        self.log_message( "authenticated using: %s" % ret )
+
         _shred( self.__config['auth']['password'] )
         self.__client = client
         self.__connected = True
@@ -208,9 +229,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         self.socket.close()
 
 
-    def log_message(self, format, *args):
+    def log_message(self, msg, loglevel=0):
         general = self.config['general']
-        msg = "[%s] %s" % (time.asctime(), format%args )
+        msg = "[%s] %s" % (time.asctime(), msg)
         if general['log'] == "syslog":
             pass # TODO: Implement syslog..
         else:
@@ -251,7 +272,7 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         if int(version) != PROTOCOL_VERSION:
             return self.send_error( 400 )
         if not subject:
-            subject = "Notifications"
+            subject = "Notification"
 
         try:
             length = min( int( self.headers['Content-Length'] ), 4096 )
