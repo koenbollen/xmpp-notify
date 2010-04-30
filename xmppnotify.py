@@ -7,19 +7,38 @@
 import os
 import sys
 import ctypes
-import xmpp
+import re
 import socket
 import threading
 import time
-import Queue
-import re
 import urllib
+import Queue
+
+try:
+    from syslog import *
+    HAVE_SYSLOG=True
+except ImportError:
+    HAVE_SYSLOG=False
+
+from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from ConfigParser import ConfigParser, NoOptionError, NoSectionError
 from SocketServer import ThreadingMixIn
-from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+
+try:
+    import warnings
+    warnings.simplefilter( 'ignore', DeprecationWarning )
+    import xmpp
+except ImportError:
+    print >>sys.stderr, "missing module: xmpp!!"
+    print >>sys.stderr, "http://xmpppy.sourceforge.net/"
+    print >>sys.stderr, "aptitude install python-xmpp"
+    sys.exit(1)
+
 
 SERVER_VERSION = "0.0"
 PROTOCOL_VERSION = 0
+
+__all__ = [ "XMPPNotify" ]
 
 def _shred( string ):
     """Find memory of a string and override it."""
@@ -46,17 +65,30 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             "/tmp/xmpp-notify-%s.log" % os.getlogin(),
         )
 
+    loglevels = {
+            'emergency': LOG_EMERG,
+            'alert':     LOG_ALERT,
+            'critical':  LOG_CRIT,
+            'error':     LOG_ERR,
+            'warning':   LOG_WARNING,
+            'notice':    LOG_NOTICE,
+            'info':      LOG_INFO,
+            'debug':     LOG_DEBUG
+        }
+
     timeout = 10
     allow_reuse_address= True
     queue_size = -1
     daemon_threads = True
 
-    def __init__(self, autostart=False ):
+    def __init__(self, configfile=None, verbose=False, autostart=False ):
+        self.verbose = verbose
         self.__config = None
         self.__password = None
 
-        if not self.__configuration():
-            raise Exception, "Unable to read config"
+        if not self.__configuration(configfile):
+            print >>sys.stderr, "error: unable to read configuration"
+            sys.exit(0)
 
         general = self.config['general']
         addr = ( general['bind'], general['listen'] )
@@ -73,10 +105,13 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             self.start()
 
 
-    def __configuration(self ):
+    def __configuration(self, configfile ):
 
         cfg = ConfigParser()
-        cfg.read( self.filelist_config )
+        if configfile:
+            cfg.read( self.filelist_config+(configfile,) )
+        else:
+            cfg.read( self.filelist_config )
 
         if cfg.has_section( "xmpp-notify" ):
             cfg.add_section( "general" )
@@ -86,11 +121,11 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         fields = [
                 ("target",   "general", True,  cfg.get,        None    ),
-                ("debug",    "general", False, cfg.getboolean, False   ),
                 ("listen",   "general", False, cfg.getint,     5222    ),
                 ("bind",     "general", False, cfg.get,        ""      ),
                 ("log",      "general", False, cfg.get,        "file"  ),
                 ("logfile",  "general", False, cfg.get,        None    ),
+                ("loglevel", "general", False, cfg.get,        "error" ),
                 ("domain",   "auth",    True,  cfg.get,        False   ),
                 ("username", "auth",    True,  cfg.get,        False   ),
                 ("password", "auth",    True,  cfg.get,        False   ),
@@ -102,12 +137,15 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         res = {}
         for field, sect, req, func, default in fields:
             try:
-                value = func( sect, field )
+                try:
+                    value = func( sect, field )
+                except ValueError:
+                    print >>sys.stderr, "invalid configuration: %s" % field
+                    return False
                 if func == cfg.get and len(value) < 1:
                     raise NoOptionError(sect,field)
             except (NoSectionError, NoOptionError):
                 if req:
-                    # TODO: Change message
                     print >>sys.stderr, "missing configuration: %s" % field
                     return False
                 value = default
@@ -116,11 +154,19 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             res[sect][field] = value
 
         general = res['general']
+        res['general']['loglevel'] = self.loglevels.get(
+                general['loglevel'],
+                LOG_ERR
+            )
         if general['log'] not in ("file", "syslog"):
             print >>sys.stderr, "invalid configuation: log = file | syslog"
             return False
         if general['log'] == "syslog":
-            # TODO: syslog
+            if not HAVE_SYSLOG:
+                print >>sys.stderr, "error: syslog not supported"
+                return False
+            openlog( "xmpp-notify" )
+            setlogmask( LOG_UPTO(general['loglevel']) )
             res['general']['logfile'] = None
         if general['log'] == "file" and general['logfile'] == None:
             for file in self.filelist_log:
@@ -131,7 +177,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         # TODO: check of logfile is 0600
 
-        if general['debug']:
+        if general['loglevel'] >= LOG_DEBUG:
             print "Configuration:"
             for section in sorted(res.keys()):
                 for field in sorted(res[section].keys()):
@@ -142,6 +188,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             print
 
         self.__config = res
+        self.log_message( "configuration read", LOG_DEBUG )
         return True
 
 
@@ -158,11 +205,11 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 if ret:
                     self.log_message( "sent %s to %s (%s)" % (
                             info['subject'], info['target'], ret
-                        ) )
+                        ), LOG_INFO )
                 else:
                     self.log_message( "failed to send %s to %s! (%s)" % (
                             info['subject'], info['target'], ret
-                        ) )
+                        ), LOG_WARNING )
             finally:
                 self.__queue.task_done()
 
@@ -186,9 +233,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             server['host'] = auth['domain']
         ret = client.connect( server=(server['host'], server['port']) )
         if not ret:
-            self.log_message( "error: could not authenticate!" )
+            self.log_message( "error: could not connect!", LOG_CRIT )
             return False
-        self.log_message( "connected with: %s" % ret )
+        self.log_message( "connected with: %s" % ret, LOG_INFO )
 
         ret = client.auth(
                 auth['username'],
@@ -196,9 +243,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 auth['resource']
             )
         if not ret:
-            self.log_message( "error: could not authenticate!" )
+            self.log_message( "error: could not authenticate!", LOG_CRIT )
             return False
-        self.log_message( "authenticated using: %s" % ret )
+        self.log_message( "authenticated using: %s" % ret, LOG_INFO )
 
         _shred( self.__config['auth']['password'] )
         self.__client = client
@@ -217,24 +264,31 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         thr.daemon = True
         thr.start()
         self.__queue_thread = thr
+        self.log_message( "service started (pid:%d)" % os.getpid(), LOG_INFO )
         self.serve_forever()
         return True
 
 
     def close(self ):
+        self.log_message( "shutting down...", LOG_INFO )
         self.__alive = False
+        closelog()
         self.socket.shutdown(socket.SHUT_RD)
         self.__queue.join()
         self.__queue_thread.join(1)
         self.socket.close()
 
 
-    def log_message(self, msg, loglevel=0):
+    def log_message(self, msg, loglevel=LOG_INFO):
         general = self.config['general']
-        msg = "[%s] %s" % (time.asctime(), msg)
+        if self.verbose:
+            print msg
+        if loglevel > general['loglevel']:
+            return
         if general['log'] == "syslog":
-            pass # TODO: Implement syslog..
+            syslog( loglevel, msg )
         else:
+            msg = "[%s] %s" % (time.asctime(), msg)
             try:
                 fp = open( general['logfile'], "ab" )
             except (OSError, IOError), e:
@@ -261,7 +315,6 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
 
     rx_path = re.compile( r"/(\d+)/notify(?:/(\w+))?" )
 
-
     def do_POST(self ):
         general = self.server.config['general']
 
@@ -277,7 +330,7 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         try:
             length = min( int( self.headers['Content-Length'] ), 4096 )
         except (ValueError, KeyError):
-            length = None
+            length = 4096
 
         try:
             rawdata = self.rfile.read( length )
@@ -307,29 +360,30 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         except Queue.Full:
             return self.send_error( 503 )
 
-        self.send_response( 202, "Message Queued" )
-        self.send_header( "Content-Length:", 0 )
-        self.end_headers()
+        try:
+            self.send_response( 202, "Message Queued" )
+            self.send_header( "Content-Length:", 0 )
+            self.end_headers()
+        except IOError, e:
+            self.server.log_message( "unable to send reply: %s"%e, LOG_WARNING )
 
 
     def log_message(self, format, *args):
         msg = "%s %s" % ( self.address_string(), format%args )
-        self.server.log_message( msg )
+        self.server.log_message( msg, LOG_INFO )
 
 
 
 def main():
-    try:
-        server = XMPPNotify()
-    except:
-        return
+    server = XMPPNotify(verbose=True)
     try:
         server.start()
     except KeyboardInterrupt:
         server.close()
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit( main() )
 
 # vim: expandtab shiftwidth=4 softtabstop=4 textwidth=79:
 
