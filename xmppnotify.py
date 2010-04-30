@@ -141,13 +141,19 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 try:
                     value = func( sect, field )
                 except ValueError:
-                    print >>sys.stderr, "invalid configuration: %s" % field
+                    t = "string"
+                    if func == cfg.getint:
+                        t = "integer"
+                    msg = "error: invalid configuration value: %s" \
+                          " (should be: %d)" % (field, t)
+                    print >>sys.stderr, msg
                     return False
                 if func == cfg.get and len(value) < 1:
                     raise NoOptionError(sect,field)
             except (NoSectionError, NoOptionError):
                 if req:
-                    print >>sys.stderr, "missing configuration: %s" % field
+                    msg = "error: missing configuration field: %s"%field
+                    print >>sys.stderr, msg
                     return False
                 value = default
             if sect not in res:
@@ -160,7 +166,8 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 LOG_ERR
             )
         if general['log'] not in ("file", "syslog"):
-            print >>sys.stderr, "invalid configuation: log = file | syslog"
+            msg = "error: invalid configuation value: log = file | syslog"
+            print >>sys.stderr, msg
             return False
         if general['log'] == "syslog":
             if not HAVE_SYSLOG:
@@ -192,7 +199,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                         )
 
 
-        if general['loglevel'] >= LOG_DEBUG:
+        if general['loglevel'] >= LOG_DEBUG and self.verbose:
             print "Configuration:"
             for section in sorted(res.keys()):
                 for field in sorted(res[section].keys()):
@@ -265,7 +272,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         try:
             _shred( self.__config['auth']['password'] )
-        except:
+        except Exception, e:
             self.log_message(
                     "unable to shred password from memory! %s" % (str(e)),
                     LOG_WARNING
@@ -297,7 +304,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         closelog()
         self.socket.shutdown(socket.SHUT_RD)
 
-        if self.__queue_thread and self.__queue_thread.is_alive():
+        if self.__queue_thread and self.__queue_thread.isAlive():
             self.__queue.join()
             self.__queue_thread.join(1)
 
