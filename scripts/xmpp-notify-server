@@ -1,0 +1,55 @@
+#!/usr/bin/env python
+# Send notification to another XMPP client.
+# Koen Bollen <meneer koenbollen nl>
+# 2010 GPL
+
+from optparse import OptionParser
+from select import error as selecterror
+import signal
+import xmppnotify
+
+app = None
+
+def signalhandler( signum, frame ):
+    global app
+    if app:
+        app.close()
+
+def main():
+    global app
+
+    parser = OptionParser()
+
+    parser.add_option( "-c", "--config",
+            metavar="FILE", default=None,
+            help="use FILE as configfile" )
+
+    parser.add_option( "-v", "--verbose",
+            action="store_true", default=False,
+            help="print log messages" )
+
+    (options, args) = parser.parse_args()
+
+    for s in ( signal.SIGINT, signal.SIGTERM ):
+        signal.signal( s, signalhandler )
+
+    app = xmppnotify.XMPPNotify(
+            configfile=options.config,
+            verbose=options.verbose,
+        )
+
+    try:
+        app.start()
+    except KeyboardInterrupt:
+        pass
+    except selecterror, e:
+        errno, error = e
+        if errno != 4:
+            raise
+
+
+if __name__ == "__main__":
+    main()
+
+# vim: expandtab shiftwidth=4 softtabstop=4 textwidth=79:
+

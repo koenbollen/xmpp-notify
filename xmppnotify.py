@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#
 # Send notification to another XMPP client.
 # Koen Bollen <meneer koenbollen nl>
 # 2010 GPL
@@ -6,6 +6,7 @@
 
 import os
 import sys
+import stat
 import ctypes
 import re
 import socket
@@ -35,8 +36,8 @@ except ImportError:
     sys.exit(1)
 
 
-SERVER_VERSION = "0.0"
-PROTOCOL_VERSION = 0
+APPLICATION_VERSION = "0.1"
+PROTOCOL_VERSION = 1
 
 __all__ = [ "XMPPNotify" ]
 
@@ -88,7 +89,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         if not self.__configuration(configfile):
             print >>sys.stderr, "error: unable to read configuration"
-            sys.exit(0)
+            sys.exit(1)
 
         general = self.config['general']
         addr = ( general['bind'], general['listen'] )
@@ -109,9 +110,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         cfg = ConfigParser()
         if configfile:
-            cfg.read( self.filelist_config+(configfile,) )
+            fileread = cfg.read( self.filelist_config+(configfile,) )
         else:
-            cfg.read( self.filelist_config )
+            fileread = cfg.read( self.filelist_config )
 
         if cfg.has_section( "xmpp-notify" ):
             cfg.add_section( "general" )
@@ -175,7 +176,21 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                     res['general']['logfile'] = file
                     break
 
-        # TODO: check of logfile is 0600
+        self.__config = res
+
+        if sys.platform != "win32":
+            for file in fileread:
+                try:
+                    stats = os.stat( file )
+                    mode = stat.S_IMODE( stats[stat.ST_MODE] )
+                except OSError:
+                    continue
+                if (mode & 0077) != 0:
+                    self.log_message(
+                            "warning: config %s can be read by others!"%file,
+                            LOG_WARNING
+                        )
+
 
         if general['loglevel'] >= LOG_DEBUG:
             print "Configuration:"
@@ -187,8 +202,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                     print " %s.%s = %r" % (section,field,value)
             print
 
-        self.__config = res
-        self.log_message( "configuration read", LOG_DEBUG )
+        self.log_message(
+                "configuration read: %s" % (repr(fileread)),
+                LOG_DEBUG )
         return True
 
 
@@ -247,7 +263,13 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             return False
         self.log_message( "authenticated using: %s" % ret, LOG_INFO )
 
-        _shred( self.__config['auth']['password'] )
+        try:
+            _shred( self.__config['auth']['password'] )
+        except:
+            self.log_message(
+                    "unable to shred password from memory! %s" % (str(e)),
+                    LOG_WARNING
+                )
         self.__client = client
         self.__connected = True
         return True
@@ -274,8 +296,11 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         self.__alive = False
         closelog()
         self.socket.shutdown(socket.SHUT_RD)
-        self.__queue.join()
-        self.__queue_thread.join(1)
+
+        if self.__queue_thread and self.__queue_thread.is_alive():
+            self.__queue.join()
+            self.__queue_thread.join(1)
+
         self.socket.close()
 
 
@@ -303,7 +328,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
 class NotifyRequestHandler( BaseHTTPRequestHandler ):
-    server_version = "XMPPNotify/"+SERVER_VERSION
+    server_version = "XMPPNotify/"+APPLICATION_VERSION
     protocol_version = "HTTP/1.1"
 
     fields = {
@@ -372,18 +397,6 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         msg = "%s %s" % ( self.address_string(), format%args )
         self.server.log_message( msg, LOG_INFO )
 
-
-
-def main():
-    server = XMPPNotify(verbose=True)
-    try:
-        server.start()
-    except KeyboardInterrupt:
-        server.close()
-    return 0
-
-if __name__ == "__main__":
-    sys.exit( main() )
 
 # vim: expandtab shiftwidth=4 softtabstop=4 textwidth=79:
 

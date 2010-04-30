@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+# Send notification to another XMPP client.
+# Koen Bollen <meneer koenbollen nl>
+# 2010 GPL
+
+import sys
+import urllib, urllib2
+from optparse import OptionParser
+
+
+def main():
+
+    parser = OptionParser()
+    parser.add_option( "-t", "--target" )
+    parser.add_option( "-s", "--subject" )
+    parser.add_option( "-f", "--file" )
+
+    parser.add_option( "-n", "--host", default="localhost" );
+    parser.add_option( "-p", "--port", default=5222 );
+    (options, args) = parser.parse_args()
+
+    fp = None
+    data = None
+    if options.file:
+        try:
+            fp = open( options.file )
+        except OSError, e:
+            print >>sys.stderr, "error:", options.file + ":", e
+            sys.exit(1)
+    elif len(args) > 0:
+        data = " ".join( args )
+    else:
+        fp = sys.stdin
+    if fp:
+        try:
+            data = fp.read()
+        finally:
+            fp.close()
+
+    data = data.strip()
+    if len(data) < 1:
+        print "no data"
+        sys.exit(0)
+
+    post = { 'data': data }
+    if options.target:
+        post['target'] = options.target
+    if options.subject:
+        post['subject'] = options.subject
+    post = urllib.urlencode(post)
+
+    url = "http://%s:%d/1/notify" % (options.host, options.port)
+    req = urllib2.Request( url, post )
+
+    try:
+        response = urllib2.urlopen( req )
+    except IOError, e:
+        print >>sys.stderr, "unable to connect:", e
+        sys.exit(1)
+    if response.code != 202:
+        print >>sys.stderr, "unexpected response code: %d %s" % (
+                response.code, response.msg )
+    response.close()
+
+if __name__ == "__main__":
+    main()
+
+# vim: expandtab shiftwidth=4 softtabstop=4 textwidth=79:
+
