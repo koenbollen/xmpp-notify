@@ -79,7 +79,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
     timeout = 10
     allow_reuse_address= True
-    queue_size = -1
+    queue_size = 25
     daemon_threads = True
 
     def __init__(self, configfile=None, verbose=False, autostart=False ):
@@ -107,35 +107,42 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
     def __configuration(self, configfile ):
+        """Read, parse and validate configuration files."""
 
+        # Create configparser and read file(s):
         cfg = ConfigParser()
         if configfile:
             fileread = cfg.read( self.filelist_config+(configfile,) )
         else:
             fileread = cfg.read( self.filelist_config )
 
+        # Sort sections:
         if cfg.has_section( "xmpp-notify" ):
             cfg.add_section( "general" )
             for k,v in cfg.items("xmpp-notify"):
                 cfg.set( "general", k, v )
             cfg.remove_section( "xmpp-notify" )
 
+        # Available fields, these will be read:
         fields = [
-                ("target",   "general", True,  cfg.get,        None    ),
-                ("key",      "general", False, cfg.get,        None    ),
-                ("listen",   "general", False, cfg.getint,     5222    ),
-                ("bind",     "general", False, cfg.get,        ""      ),
-                ("log",      "general", False, cfg.get,        "file"  ),
-                ("logfile",  "general", False, cfg.get,        None    ),
-                ("loglevel", "general", False, cfg.get,        "error" ),
-                ("domain",   "auth",    True,  cfg.get,        False   ),
-                ("username", "auth",    True,  cfg.get,        False   ),
-                ("password", "auth",    True,  cfg.get,        False   ),
-                ("resource", "auth",    False, cfg.get,        "notify"),
-                ("host",     "server",  False, cfg.get,        None    ),
-                ("port",     "server",  False, cfg.getint,     5222    ),
+                # field       section   required,  type,        default
+                ("target",   "general", True,      cfg.get,     None    ),
+                ("key",      "general", False,     cfg.get,     None    ),
+                ("listen",   "general", False,     cfg.getint,  5222    ),
+                ("bind",     "general", False,     cfg.get,     ""      ),
+                ("log",      "general", False,     cfg.get,     "file"  ),
+                ("logfile",  "general", False,     cfg.get,     None    ),
+                ("loglevel", "general", False,     cfg.get,     "error" ),
+                ("domain",   "auth",    True,      cfg.get,     False   ),
+                ("username", "auth",    True,      cfg.get,     False   ),
+                ("password", "auth",    True,      cfg.get,     False   ),
+                ("resource", "auth",    False,     cfg.get,     "notify"),
+                ("host",     "server",  False,     cfg.get,     None    ),
+                ("port",     "server",  False,     cfg.getint,  5222    ),
             ]
 
+
+        # Get and parse fields:
         res = {}
         for field, sect, req, func, default in fields:
             try:
@@ -161,6 +168,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 res[sect] = {}
             res[sect][field] = value
 
+        # Act of certain config options like logging:
         general = res['general']
         res['general']['loglevel'] = self.loglevels.get(
                 general['loglevel'],
@@ -186,6 +194,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         self.__config = res
 
+        # Check whether the configfile(s) are readable to others:
         if sys.platform != "win32":
             for file in fileread:
                 try:
@@ -200,6 +209,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                         )
 
 
+        # Log configuration if loglevel is debug:
         if general['loglevel'] >= LOG_DEBUG and self.verbose:
             print "Configuration:"
             for section in sorted(res.keys()):
@@ -210,6 +220,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                     print " %s.%s = %r" % (section,field,value)
             print
 
+
         self.log_message(
                 "configuration read: %s" % (repr(fileread)),
                 LOG_DEBUG )
@@ -217,6 +228,8 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
     def __queue_handle(self ):
+        """Wait for messages from the queue and handle them."""
+
         while self.__queue.qsize() > 0 or self.__alive:
             try:
                 info = self.__queue.get( True, 1 )
@@ -248,6 +261,10 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
     def connect(self ):
+        """Connect and authenticate the the xmpp server.
+
+        Tries to shred the password from memory.
+        """
         general = self.config['general']
         auth = self.config['auth']
         server = self.config['server']
@@ -271,6 +288,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             return False
         self.log_message( "authenticated using: %s" % ret, LOG_INFO )
 
+        # Whould set visible to contacts:
+        #client.sendInitPresence( requestRoster=0 )
+
         try:
             _shred( self.__config['auth']['password'] )
         except Exception, e:
@@ -284,6 +304,8 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
     def start(self ):
+        """Connect, start thread(s) and serve forever."""
+
         if self.__alive:
             return False
         if not self.__connected:
@@ -300,6 +322,8 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
     def close(self ):
+        """Shutdown, close connections and clear the queue."""
+
         self.log_message( "shutting down...", LOG_INFO )
         self.__alive = False
         closelog()
@@ -313,6 +337,8 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
 
     def log_message(self, msg, loglevel=LOG_INFO):
+        """Log a message to a file or syslog."""
+
         general = self.config['general']
         if self.verbose:
             print msg
@@ -352,6 +378,7 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
     def do_POST(self ):
         general = self.server.config['general']
 
+        # Parse /path and verify version:
         result = self.rx_path.match( self.path )
         if not result:
             return self.send_error( 404 )
@@ -361,16 +388,19 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         if not subject:
             subject = "Notification"
 
+        # Get content-length and max at 4096:
         try:
             length = min( int( self.headers['Content-Length'] ), 4096 )
         except (ValueError, KeyError):
             length = 4096
 
+        # Read bytes:
         try:
             rawdata = self.rfile.read( length )
         except IOError, e:
             return self.send_error( 500 )
 
+        # Parse rawdata for key=value fields:
         msg = { 'target': general['target'],
                 'subject': subject }
         for pair in rawdata.split("&"):
@@ -382,6 +412,8 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
             if key not in self.fields:
                 continue
             msg[key] = urllib.unquote( value.strip().replace("+"," ") )
+
+        # Convert values and check required fields:
         for key, (func, req) in self.fields.items():
             try:
                 value = func( msg[key] )
@@ -389,17 +421,20 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
             except (KeyError, ValueError):
                 if req: return self.send_error( 400 )
 
+        # Check the key if required:
         if general['key'] is not None:
             if "key" not in msg:
                 return self.send_error( 401 )
             if msg['key'] != general['key']:
                 return self.send_error( 403 )
 
+        # Queue the new request:
         try:
             self.server.queue.put_nowait( msg )
         except Queue.Full:
             return self.send_error( 503 )
 
+        # And reply:
         try:
             self.send_response( 202, "Message Queued" )
             self.send_header( "Content-Length:", 0 )
