@@ -122,6 +122,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         fields = [
                 ("target",   "general", True,  cfg.get,        None    ),
+                ("key",      "general", False, cfg.get,        None    ),
                 ("listen",   "general", False, cfg.getint,     5222    ),
                 ("bind",     "general", False, cfg.get,        ""      ),
                 ("log",      "general", False, cfg.get,        "file"  ),
@@ -341,6 +342,7 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
     fields = {
             # name:    type,  required
             'target':  (str,  False ),
+            'key':     (str,  False ),
             'subject': (str,  False ),
             'data':    (str,  True  ),
         }
@@ -386,6 +388,12 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
                 msg[key] = value
             except (KeyError, ValueError):
                 if req: return self.send_error( 400 )
+
+        if general['key'] is not None:
+            if "key" not in msg:
+                return self.send_error( 401 )
+            if msg['key'] != general['key']:
+                return self.send_error( 403 )
 
         try:
             self.server.queue.put_nowait( msg )

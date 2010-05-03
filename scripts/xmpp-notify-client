@@ -12,6 +12,7 @@ def main():
 
     parser = OptionParser()
     parser.add_option( "-t", "--target" )
+    parser.add_option( "-k", "--key" )
     parser.add_option( "-s", "--subject" )
     parser.add_option( "-f", "--file" )
 
@@ -43,10 +44,9 @@ def main():
         sys.exit(0)
 
     post = { 'data': data }
-    if options.target:
-        post['target'] = options.target
-    if options.subject:
-        post['subject'] = options.subject
+    for f in ('target','key','subject'):
+        if hasattr(options,f) and getattr(options,f):
+            post[f] = getattr( options, f )
     post = urllib.urlencode(post)
 
     url = "http://%s:%d/1/notify" % (options.host, options.port)
