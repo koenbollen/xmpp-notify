@@ -1,5 +1,37 @@
 
 
+== Quick start ==
+
+This project, xmpp-notify, is a work-in-progress. This might help you
+getting started:
+
+First, clone repository:
+ git clone git://github.com/koenbollen/xmpp-notify.git
+ cd xmpp-notify
+
+Then copy configuration to the local user and edit it:
+ cp xmpp-notify.cfg ~/.xmpp-notify.py
+ vi ~/.xmpp-notify.py
+note: at least supply: target, host, domain, username & password
+
+Run the server in verbose mode:
+ ./scripts/xmpp-notify-server -v
+
+And (in another terminal) send requests:
+ ./scripts/xmpp-notify-client Hello, XMPP
+ curl -d "data=Updates" http://localhost:5222/1/notify
+
+
+This will install install the application and check the permissions:
+ sudo python setup.py install
+ sudo chmod 0600 /etc/xmpp-notify.cfg     << edit this
+
+
+ -- Koen Bollen, 2010
+
+
+
+
 == License ==
 
 Send notification to another XMPP client.
