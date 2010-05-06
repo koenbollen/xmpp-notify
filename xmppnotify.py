@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 import urllib
+import shlex
 import Queue
 
 try:
@@ -49,6 +50,37 @@ def _shred( string ):
     size = sys.getsizeof(string) - header
     #print "Clearing 0x%08x size %i bytes" % (location, size)
     ctypes.memset( location, 0, size )
+
+def _multipart( rawdata, boundary ):
+    parts = rawdata.split( "--"+boundary )
+    if parts[-1].strip() != "--":
+        raise ValueError, "invalid sentinel"
+    for part in parts[1:-1]:
+        headers = {}
+        data = None
+        for line in part.lstrip().splitlines():
+            if len( line.strip() ) < 1: # end of headers
+                data = []
+            elif data is None: # still reading headers
+                key, value = line.split( ":", 1 )
+                headers[key.strip().lower()] = value.strip()
+            else:
+                data.append( line )
+        try:
+            dispos = headers['content-disposition'].split(";")
+            if dispos[0].strip() != "form-data":
+                continue
+            name = None
+            for attr in dispos[1:]:
+                key, value = shlex.split( attr.replace("=", " ") )
+                if key.strip() == "name":
+                    name = value.strip()
+                    break
+            if not name:
+                raise ValueError, "missing name=field"
+        except KeyError:
+            raise ValueError, "missing Content-Disposition header"
+        yield name, "\n".join(data)
 
 
 class XMPPNotify( ThreadingMixIn, HTTPServer ):
@@ -388,6 +420,24 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         if not subject:
             subject = "Notification"
 
+        # Read contenttype and validate:
+        try:
+            ctype = self.headers['Content-Type'].strip().lower()
+            parts = ctype.split( ";" )
+            ctype = parts[0].strip()
+            ctype_params = {}
+            for part in parts[1:]:
+                if not "=" in part:
+                    continue
+                k, v = part.strip().split("=",1)
+                ctype_params[k.strip()] = v.strip()
+            if ctype not in (
+                    "application/x-www-form-urlencoded",
+                    "multipart/form-data", "text/plain" ):
+                raise ValueError, "invalid contenttype"
+        except (KeyError, ValueError):
+            return self.send_error( 400 )
+
         # Get content-length and max at 4096:
         try:
             length = min( int( self.headers['Content-Length'] ), 4096 )
@@ -403,15 +453,28 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         # Parse rawdata for key=value fields:
         msg = { 'target': general['target'],
                 'subject': subject }
-        for pair in rawdata.split("&"):
+        if ctype == "application/x-www-form-urlencoded":
+            for pair in rawdata.split("&"):
+                try:
+                    key, value = pair.split( "=", 1 )
+                except ValueError:
+                    key, value = pair, True
+                key = key.lower().strip()
+                if key not in self.fields:
+                    continue
+                msg[key] = urllib.unquote( value.strip().replace("+"," ") )
+        elif ctype == "multipart/form-data":
             try:
-                key, value = pair.split( "=", 1 )
+                boundary = ctype_params['boundary']
+            except KeyError:
+                return self.send_error( 400 )
+            try:
+                for key, value in _multipart( rawdata, boundary ):
+                    msg[key] = value
             except ValueError:
-                key, value = pair, True
-            key = key.lower().strip()
-            if key not in self.fields:
-                continue
-            msg[key] = urllib.unquote( value.strip().replace("+"," ") )
+                return self.send_error( 400 )
+        elif ctype == "text/plain":
+            msg['data'] = rawdata.strip()
 
         # Convert values and check required fields:
         for key, (func, req) in self.fields.items():
