@@ -42,6 +42,22 @@ PROTOCOL_VERSION = 1
 
 __all__ = [ "XMPPNotify" ]
 
+def _getlogin():
+    try:
+        return os.getlogin()
+    except OSError:
+        pass
+    for e in ('LOGNAME','USER','USERNAME'):
+        try:
+            return os.environ[e]
+        except KeyError:
+            pass
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid())[0]
+    except (KeyError, IndexError):
+        raise OSError, "unable to find login"
+
 def _shred( string ):
     """Find memory of a string and override it."""
     f = "finding offset"
@@ -95,7 +111,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             "/var/log/xmpp-notify.log",
             os.path.expanduser( "~/.xmpp-notify.log" ),
             "xmpp-notify.log",
-            "/tmp/xmpp-notify-%s.log" % os.getlogin(),
+            "/tmp/xmpp-notify-%s.log" % _getlogin(),
         )
 
     loglevels = {
