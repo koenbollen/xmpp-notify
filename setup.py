@@ -19,7 +19,9 @@ setup(
         scripts = [
             "scripts/xmpp-notify-server",
             "scripts/xmpp-notify-client" ],
-        data_files = [ ('/etc', ['xmpp-notify.cfg'] ) ],
+        data_files = [
+            ('/etc', ['xmpp-notify.cfg'] ),
+            ('/etc/init.d', ['scripts/xmppnotify'] ) ],
 
     )
 
