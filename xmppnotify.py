@@ -130,12 +130,13 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
     queue_size = 25
     daemon_threads = True
 
-    def __init__(self, configfile=None, verbose=False, autostart=False ):
+    def __init__(self, conffile=None, verbose=False, fork=False, start=False ):
         self.verbose = verbose
+        self.fork = fork
         self.__config = None
         self.__password = None
 
-        if not self.__configuration(configfile):
+        if not self.__configuration(conffile):
             print >>sys.stderr, "error: unable to read configuration"
             sys.exit(1)
 
@@ -150,7 +151,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         self.__connected = False
         self.__alive = False
 
-        if autostart:
+        if start:
             self.start()
 
 
@@ -356,6 +357,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         if self.__alive:
             return False
+        self.daemonize()
         if not self.__connected:
             if not self.connect():
                 return False
@@ -406,6 +408,43 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 print >>sys.stderr, "error:", e
             finally:
                 fp.close()
+
+
+    def daemonize(self ):
+        if not self.fork:
+            return
+        self.log_message( "Detaching process to the background", LOG_DEBUG )
+        self.verbose = False
+        try:
+            pid = os.fork()
+        except OSError, e:
+            raise Exception, "%s [%d]" % (e.strerror, e.errno)
+        if pid:
+            os._exit(0)
+
+        os.setsid()
+
+        import signal
+        signal.signal( signal.SIGHUP, signal.SIG_IGN )
+
+        try:
+            pid = os.fork()
+        except OSError, e:
+            raise Exception, "%s [%d]" % (e.strerror, e.errno)
+        if pid:
+            os._exit(0)
+
+        os.chdir( "/" )
+        os.umask( 0 )
+
+        fd = os.open( os.devnull, os.O_RDWR )
+        os.close(0)
+        os.dup2( fd, 0 )
+        os.close(1)
+        os.dup2( fd, 1 )
+        os.close(2)
+        os.dup2( fd, 2 )
+        os.close( fd )
 
 
 

@@ -28,14 +28,19 @@ def main():
             action="store_true", default=False,
             help="print log messages" )
 
+    parser.add_option( "-d", "--fork",
+            action="store_true", default=False,
+            help="run in background" )
+
     (options, args) = parser.parse_args()
 
     for s in ( signal.SIGINT, signal.SIGTERM ):
         signal.signal( s, signalhandler )
 
     app = xmppnotify.XMPPNotify(
-            configfile=options.config,
+            conffile=options.config,
             verbose=options.verbose,
+            fork=options.fork,
         )
 
     try:
