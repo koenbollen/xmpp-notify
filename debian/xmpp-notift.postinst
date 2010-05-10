@@ -1,0 +1,4 @@
+
+# Conffile could contain a password:
+chmod 0600 /etc/xmpp-notify.cfg
+

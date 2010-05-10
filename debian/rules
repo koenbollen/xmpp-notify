@@ -1,0 +1,52 @@
+#!/usr/bin/make -f
+
+# Verbose mode
+export DH_VERBOSE=1
+export DH_PYCENTRAL=nomove
+
+PYTHON := /usr/bin/python
+PYVER := $(shell $(PYTHON) -c 'import sys; print sys.version[:3]')
+BUILDDIR=$(CURDIR)/debian/xmpp-notify
+
+build: build-stamp
+
+build-stamp:
+	dh_testdir
+	python setup.py build
+	touch build-stamp
+
+clean:
+	dh_testdir
+	dh_testroot
+	rm -rf build-stamp
+	rm -rf build
+	-find . -name '*.py[co]' | xargs rm -f
+	dh_clean
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_clean -k
+	dh_installdirs
+	python setup.py install --root=$(BUILDDIR)
+
+# Build architecture-independent files here.
+binary-indep: build install
+	dh_testdir
+	dh_testroot
+	dh_installdocs README AUTHORS
+	dh_pycentral
+	cat debian/xmpp-notift.postinst >> debian/xmpp-notify.postinst.debhelper
+	dh_compress -X.py
+	dh_fixperms
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+# Build architecture-dependent files here.
+binary-arch: build install
+# We have nothing to do by default.
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install configure
