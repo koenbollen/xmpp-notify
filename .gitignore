@@ -3,3 +3,11 @@
 *.log
 dist/
 MANIFEST
+build-stamp
+build/
+debian/files
+debian/xmpp-notify.postinst.debhelper
+debian/xmpp-notify.preinst.debhelper
+debian/xmpp-notify.prerm.debhelper
+debian/xmpp-notify.substvars
+debian/xmpp-notify/
