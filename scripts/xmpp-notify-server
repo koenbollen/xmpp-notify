@@ -3,6 +3,7 @@
 # Koen Bollen <meneer koenbollen nl>
 # 2010 GPL
 
+import os
 from optparse import OptionParser
 from select import error as selecterror
 import signal
@@ -32,6 +33,10 @@ def main():
             action="store_true", default=False,
             help="run in background" )
 
+    parser.add_option( "--pidfile",
+            metavar="FILE", default=None,
+            help="store pid in FILE" )
+
     (options, args) = parser.parse_args()
 
     for s in ( signal.SIGINT, signal.SIGTERM ):
@@ -42,6 +47,7 @@ def main():
             verbose=options.verbose,
             fork=options.fork,
         )
+    app.pidfile = os.path.abspath( options.pidfile )
 
     try:
         app.start()

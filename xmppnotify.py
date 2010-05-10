@@ -133,6 +133,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
     def __init__(self, conffile=None, verbose=False, fork=False, start=False ):
         self.verbose = verbose
         self.fork = fork
+        self.pidfile = None
         self.__config = None
         self.__password = None
 
@@ -358,6 +359,10 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         if self.__alive:
             return False
         self.daemonize()
+        if self.pidfile:
+            fp = open( self.pidfile, "wb" )
+            print >>fp, "%d" % os.getpid()
+            fp.close()
         if not self.__connected:
             if not self.connect():
                 return False
@@ -384,6 +389,12 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             self.__queue_thread.join(1)
 
         self.socket.close()
+
+        if self.pidfile:
+            try:
+                os.unlink( self.pidfile )
+            except (OSError, IOError):
+                pass
 
 
     def log_message(self, msg, loglevel=LOG_INFO):
