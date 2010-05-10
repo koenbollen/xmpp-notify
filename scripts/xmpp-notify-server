@@ -47,7 +47,8 @@ def main():
             verbose=options.verbose,
             fork=options.fork,
         )
-    app.pidfile = os.path.abspath( options.pidfile )
+    if options.pidfile:
+        app.pidfile = os.path.abspath( options.pidfile )
 
     try:
         app.start()
