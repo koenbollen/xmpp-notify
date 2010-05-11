@@ -175,21 +175,21 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         # Available fields, these will be read:
         fields = [
-                # field       section   required,  type,        default
-                ("target",   "general", True,      cfg.get,     None    ),
-                ("key",      "general", False,     cfg.get,     None    ),
-                ("listen",   "general", False,     cfg.getint,  5222    ),
-                ("bind",     "general", False,     cfg.get,     ""      ),
-                ("log",      "general", False,     cfg.get,     "file"  ),
-                ("logfile",  "general", False,     cfg.get,     None    ),
-                ("loglevel", "general", False,     cfg.get,     "error" ),
-                ("domain",   "auth",    True,      cfg.get,     False   ),
-                ("username", "auth",    True,      cfg.get,     False   ),
-                ("password", "auth",    True,      cfg.get,     False   ),
-                ("resource", "auth",    False,     cfg.get,     "notify"),
-                ("presence", "auth",    False,     cfg.getint,  True    ),
-                ("host",     "server",  False,     cfg.get,     None    ),
-                ("port",     "server",  False,     cfg.getint,  5222    ),
+                # field       section   required,  type,           default
+                ("target",   "general", True,      cfg.get,        None    ),
+                ("key",      "general", False,     cfg.get,        None    ),
+                ("listen",   "general", False,     cfg.getint,     5222    ),
+                ("bind",     "general", False,     cfg.get,        ""      ),
+                ("log",      "general", False,     cfg.get,        "file"  ),
+                ("logfile",  "general", False,     cfg.get,        None    ),
+                ("loglevel", "general", False,     cfg.get,        "error" ),
+                ("domain",   "auth",    True,      cfg.get,        False   ),
+                ("username", "auth",    True,      cfg.get,        False   ),
+                ("password", "auth",    True,      cfg.get,        False   ),
+                ("resource", "auth",    False,     cfg.get,        "notify"),
+                ("presence", "auth",    False,     cfg.getboolean, True    ),
+                ("host",     "server",  False,     cfg.get,        None    ),
+                ("port",     "server",  False,     cfg.getint,     5222    ),
             ]
 
 
@@ -203,8 +203,10 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                     t = "string"
                     if func == cfg.getint:
                         t = "integer"
+                    elif func == cfg.getboolean:
+                        t = "boolean"
                     msg = "error: invalid configuration value: %s" \
-                          " (should be: %d)" % (field, t)
+                          " (should be: %s)" % (field, t)
                     print >>sys.stderr, msg
                     return False
                 if func == cfg.get and len(value) < 1:
