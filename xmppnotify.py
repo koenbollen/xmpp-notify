@@ -187,6 +187,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 ("username", "auth",    True,      cfg.get,     False   ),
                 ("password", "auth",    True,      cfg.get,     False   ),
                 ("resource", "auth",    False,     cfg.get,     "notify"),
+                ("presence", "auth",    False,     cfg.getint,  True    ),
                 ("host",     "server",  False,     cfg.get,     None    ),
                 ("port",     "server",  False,     cfg.getint,  5222    ),
             ]
@@ -338,8 +339,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             return False
         self.log_message( "authenticated using: %s" % ret, LOG_INFO )
 
-        # Whould set visible to contacts:
-        #client.sendInitPresence( requestRoster=0 )
+        if auth['presence']:
+            client.sendInitPresence( requestRoster=0 )
+            self.log_message( "Sent init presence", LOG_DEBUG )
 
         try:
             _shred( self.__config['auth']['password'] )
