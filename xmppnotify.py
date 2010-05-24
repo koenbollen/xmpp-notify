@@ -150,6 +150,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
 
         self.__client = None
         self.__connected = False
+        self.__tries = 0
         self.__alive = False
 
         if start:
@@ -291,7 +292,16 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             try:
                 msg = xmpp.Message( info['target'], info['data'],
                         subject=info['subject'] )
-                ret = self.__client.send( msg )
+                try:
+                    ret = self.__client.send( msg )
+                except IOError:
+                    try:
+                        self.__queue.put_nowait( info )
+                    except:
+                        pass
+                    self.reconnect()
+                    continue
+
                 if ret:
                     self.log_message( "sent %s to %s (%s)" % (
                             info['subject'], info['target'], ret
@@ -345,6 +355,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             client.sendInitPresence( requestRoster=0 )
             self.log_message( "Sent init presence", LOG_DEBUG )
 
+        """
         try:
             _shred( self.__config['auth']['password'] )
         except Exception, e:
@@ -352,9 +363,37 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                     "unable to shred password from memory! %s" % (str(e)),
                     LOG_WARNING
                 )
+        """
         self.__client = client
         self.__connected = True
         return True
+
+
+    def reconnect(self ):
+        if self.__client.isConnected():
+            self.__tries = 0
+            return
+
+        self.__tries += 1
+        if self.__tries >= 10:
+            self.log_message( "unable to reconnect after trying 10 times." ,
+                    LOG_WARNING )
+            sys.exit( 1 )
+
+        self.log_message( "reconnecting", LOG_WARNING )
+        try:
+            self.__client.disconnect()
+        except:
+            pass
+        try:
+            res = self.connect()
+            if not res:
+                raise IOError, "couldnt connect"
+            self.__tries = 0
+        except IOError:
+            time.sleep( self.__tries )
+            self.reconnect()
+
 
 
     def start(self ):
