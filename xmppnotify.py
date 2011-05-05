@@ -313,6 +313,10 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             finally:
                 self.__queue.task_done()
 
+    def __xmpp_process(self):
+        while self.__alive:
+            self.__client.Process(1)
+
 
     @property
     def config(self ):
@@ -340,6 +344,8 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
             self.log_message( "error: could not connect!", LOG_CRIT )
             return False
         self.log_message( "connected with: %s" % ret, LOG_INFO )
+
+        client.RegisterHandler( "message", self.on_message )
 
         ret = client.auth(
                 auth['username'],
@@ -414,6 +420,9 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
         thr.daemon = True
         thr.start()
         self.__queue_thread = thr
+        thr1 = threading.Thread(name="xmpp-thread", target=self.__xmpp_process)
+        thr1.daemon = True
+        thr1.start()
         self.log_message( "service started (pid:%d)" % os.getpid(), LOG_INFO )
         self.serve_forever()
         return True
@@ -438,6 +447,13 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 os.unlink( self.pidfile )
             except (OSError, IOError):
                 pass
+
+
+    def on_message(self, con, event ):
+        etype = event.getType()
+        fromjid = event.getFrom().getStripped()
+        if etype in ['message', 'chat', None] and event.getBody() is not None:
+            self.log_message( str(fromjid) + " says: " + repr(event.getBody()) )
 
 
     def log_message(self, msg, loglevel=LOG_INFO):
@@ -619,6 +635,4 @@ class NotifyRequestHandler( BaseHTTPRequestHandler ):
         msg = "%s %s" % ( self.address_string(), format%args )
         self.server.log_message( msg, LOG_INFO )
 
-
-# vim: expandtab shiftwidth=4 softtabstop=4 textwidth=79:
-
+# vim: expandtab tabstop=4 softtabstop=4 shiftwidth=4 textwidth=79:
