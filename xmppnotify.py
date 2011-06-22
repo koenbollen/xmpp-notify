@@ -291,7 +291,7 @@ class XMPPNotify( ThreadingMixIn, HTTPServer ):
                 continue
             try:
                 msg = xmpp.Message( info['target'], info['data'],
-                        subject=info['subject'] )
+                        subject=info['subject'], typ="chat" )
                 try:
                     ret = self.__client.send( msg )
                 except IOError:
